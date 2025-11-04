@@ -1,0 +1,12 @@
+# Node / Next.js outputs
+node_modules/
+.next/
+dist/
+.eslintcache
+.vercel/
+.DS_Store
+
+# Local env files (secrets stay out of git)
+.env*
+!.env.example
+!.env.local.example
