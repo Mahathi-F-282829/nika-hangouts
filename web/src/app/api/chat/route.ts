@@ -4,6 +4,29 @@ import { createOpenAI } from "@ai-sdk/openai";
 
 export const runtime = "nodejs";
 
+type TextMessagePart = {
+    type: "text";
+    text: string;
+};
+
+type UIMessageLike = {
+    role: string;
+    parts?: unknown[];
+    content?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
+function isUIMessageLike(value: unknown): value is UIMessageLike {
+    return isRecord(value) && typeof value.role === "string";
+}
+
+function isTextMessagePart(value: unknown): value is TextMessagePart {
+    return isRecord(value) && value.type === "text" && typeof value.text === "string";
+}
+
 /**
  * System contract appended to the model so the UI can reliably parse places
  * from the final streamed line (<PLACES>…</PLACES> with compact JSON).
@@ -61,14 +84,14 @@ export async function POST(req: Request) {
 
     try {
         // Extract the latest user prompt from the UI message array.
-        const body = await req.json().catch(() => ({}));
-        const uiMessages = body?.messages ?? [];
-        const lastUser = [...uiMessages].reverse().find((m: any) => m.role === "user");
+        const body = (await req.json().catch(() => ({}))) as { messages?: unknown };
+        const uiMessages = Array.isArray(body.messages) ? body.messages.filter(isUIMessageLike) : [];
+        const lastUser = [...uiMessages].reverse().find((m) => m.role === "user");
         let prompt = "Hello!";
         if (lastUser) {
             if (Array.isArray(lastUser.parts)) {
-                const textParts = lastUser.parts.filter((p: any) => p.type === "text");
-                prompt = textParts.map((p: any) => p.text).join("\n").trim() || prompt;
+                const textParts = lastUser.parts.filter(isTextMessagePart);
+                prompt = textParts.map((p) => p.text).join("\n").trim() || prompt;
             } else if (typeof lastUser.content === "string") {
                 prompt = lastUser.content;
             }
@@ -130,8 +153,8 @@ export async function POST(req: Request) {
                 "X-Accel-Buffering": "no",
             },
         });
-    } catch (err: any) {
-        const msg = typeof err?.message === "string" ? err.message : "Unknown error";
+    } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
         console.error("[/api/chat] Fatal error:", msg);
         return fallbackStream(`(Error) ${msg}`);
     }

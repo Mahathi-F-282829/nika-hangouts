@@ -10,8 +10,30 @@ import type { FeatureCollection, Feature } from "geojson";
 /* ----------------------------- Helpers & Types ---------------------------- */
 
 type TextPart = { type: "text"; text: string };
+type ChatMessage = {
+    id: string;
+    role: string;
+    parts?: unknown[];
+    content?: string;
+};
+type FeatureProps = Record<string, unknown> & {
+    short_name?: string;
+    name?: string;
+    display_name?: string;
+    osm_id?: string | number;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === "object" && value !== null;
+}
+
 const isTextPart = (p: unknown): p is TextPart =>
-    !!p && (p as any).type === "text" && typeof (p as any).text === "string";
+    isRecord(p) && p.type === "text" && typeof p.text === "string";
+
+function getFeatureProps(value: unknown): FeatureProps {
+    if (!isRecord(value)) return {};
+    return value as FeatureProps;
+}
 
 /** Try to infer a city from the user’s last prompt (very light-weight heuristic). */
 function extractCityHint(prompt: string): string | null {
@@ -84,21 +106,22 @@ function parsePlacesFromAssistant(fullText: string): Place[] {
 }
 
 /** Flatten a chat message into plain text (handles parts/deltas). */
-function messageToPlainText(m: any): string {
+function messageToPlainText(m: ChatMessage): string {
     if (Array.isArray(m.parts)) {
         return (m.parts as unknown[])
             .filter(isTextPart)
             .map((p: TextPart) => p.text)
             .join(" ");
     }
-    return (m.content as string) ?? "";
+    return m.content ?? "";
 }
 
 /* --------------------------------- Page UI -------------------------------- */
 
 export default function ChatPage() {
     const [input, setInput] = useState("");
-    const { messages, status, error, sendMessage, stop } = useChat();
+    const { messages: rawMessages, status, error, sendMessage, stop } = useChat();
+    const messages = rawMessages as ChatMessage[];
 
     // Keep chat scrolled to bottom as messages arrive
     const chatContainerRef = useRef<HTMLDivElement | null>(null);
@@ -120,14 +143,14 @@ export default function ChatPage() {
     useEffect(() => {
         if (status !== "ready" || messages.length === 0) return;
 
-        const last = messages[messages.length - 1] as any;
+        const last = messages[messages.length - 1];
         if (last.role !== "assistant") return;
         if (last.id === lastHandledAssistantId.current) return;
 
         const assistantText = messageToPlainText(last).trim();
         if (!assistantText) return;
 
-        const userLast = [...messages].reverse().find((m: any) => m.role === "user") as any | undefined;
+        const userLast = [...messages].reverse().find((m) => m.role === "user");
         const cityHint = userLast ? extractCityHint(messageToPlainText(userLast)) : null;
 
         (async () => {
@@ -160,8 +183,12 @@ export default function ChatPage() {
                         if (!f.geometry) continue;
                         if (f.geometry.type !== "Polygon" && f.geometry.type !== "MultiPolygon") continue;
 
-                        const props = (f.properties ?? {}) as any;
-                        const label = props.short_name || props.name || props.display_name || name;
+                        const props = getFeatureProps(f.properties);
+                        const label =
+                            (typeof props.short_name === "string" && props.short_name) ||
+                            (typeof props.name === "string" && props.name) ||
+                            (typeof props.display_name === "string" && props.display_name) ||
+                            name;
                         const osm = props.osm_id ? String(props.osm_id) : "";
                         const nameKey = label.toLowerCase().trim();
 
@@ -174,7 +201,7 @@ export default function ChatPage() {
                             seenByName.add(nameKey);
                         }
 
-                        (f.properties as any) = { ...props, name: label };
+                        f.properties = { ...props, name: label };
                         features.push(f);
                         break; // take the first polygon match for this query
                     }
@@ -204,7 +231,7 @@ export default function ChatPage() {
                 <header className="p-3 border-b font-medium shrink-0">Nika Hangouts</header>
 
                 <div ref={chatContainerRef} className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
-                    {messages.map((m: any) => (
+                    {messages.map((m) => (
                         <div
                             key={m.id}
                             className={
@@ -217,7 +244,7 @@ export default function ChatPage() {
                                 // Raw content (handles both parts & plain content)
                                 const raw = Array.isArray(m.parts)
                                     ? (m.parts as unknown[]).filter(isTextPart).map((p: TextPart) => p.text).join(" ")
-                                    : ((m as any).content ?? "");
+                                    : (m.content ?? "");
 
                                 // For assistant messages, hide the embedded <PLACES> JSON block from the UI
                                 const visible = m.role === "assistant" ? stripPlacesTag(raw).trim() : raw;

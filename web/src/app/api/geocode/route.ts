@@ -66,9 +66,9 @@ export async function POST(req: NextRequest) {
 
         const fc = (await res.json()) as GeoJSON.FeatureCollection;
         return fcResponse(fc, 200);
-    } catch (err: any) {
+    } catch (err: unknown) {
         return fcResponse(emptyFC(), 200, {
-            error: String(err?.message ?? err ?? "Unknown error"),
+            error: err instanceof Error ? err.message : String(err ?? "Unknown error"),
         });
     }
 }
